@@ -1,0 +1,435 @@
+{
+  "name": "AI Lead Capture Agent (WhatsApp to Google Sheets CRM)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## AI Lead Capture Agent (WhatsApp -> Google Sheets CRM)\n\n**Setup**\n1. Connect a WhatsApp number in Evolution API (scan the QR code).\n2. In Evolution API, set the instance webhook to this workflow's PRODUCTION URL with event MESSAGES_UPSERT.\n3. Open 'Config' and fill in your Evolution server URL, instance name, API key and your own WhatsApp number (country code, no +).\n4. Add credentials: OpenAI API and Google Sheets.\n5. Google Sheet tab 'Leads' with headers: Date, Name, WhatsApp Number, Interest. Paste the Sheet ID in 'Save to Google Sheet'.\n6. Replace [YOUR BUSINESS NAME] in 'AI Agent', then activate the workflow.",
+        "height": 340,
+        "width": 480
+      },
+      "id": "n-note",
+      "name": "Setup Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-lead-capture",
+        "options": {}
+      },
+      "id": "n-hook",
+      "name": "WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "5d8a2f1c-9b7e-4c3a-a1d6-7e4f0b2c8a55"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-0",
+              "name": "evolution_url",
+              "value": "https://YOUR-EVOLUTION-SERVER",
+              "type": "string"
+            },
+            {
+              "id": "cfg-1",
+              "name": "instance",
+              "value": "YOUR_INSTANCE_NAME",
+              "type": "string"
+            },
+            {
+              "id": "cfg-2",
+              "name": "api_key",
+              "value": "YOUR_EVOLUTION_API_KEY",
+              "type": "string"
+            },
+            {
+              "id": "cfg-3",
+              "name": "owner_number",
+              "value": "923XXXXXXXXX",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "n-config",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst d = body.data || {};\nconst key = d.key || {};\nconst msg = d.message || {};\nconst text = msg.conversation || (msg.extendedTextMessage && msg.extendedTextMessage.text) || '';\nconst jid = key.remoteJid || '';\nconst eventOk = !body.event || String(body.event).toLowerCase().includes('messages');\nconst skip = !eventOk || key.fromMe === true || jid.endsWith('@g.us') || !jid || !text;\n\nreturn [{\n  json: {\n    jid,\n    number: jid.split('@')[0],\n    name: d.pushName || 'Unknown',\n    text,\n    skip\n  }\n}];"
+      },
+      "id": "n-extract",
+      "name": "Extract Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1d2e3f4-skip-4a5b-8c9d-aaaaaaaaaaaa",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n-if-skip",
+      "name": "Should Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "options": {
+          "systemMessage": "You are a friendly receptionist for [YOUR BUSINESS NAME] on WhatsApp. Your only job is to collect two details from the person: their name and what they are interested in. Their WhatsApp number is already known, so do NOT ask for it. Ask for ONE missing detail at a time and keep replies short (1-2 sentences). Never invent details. If they ask a basic question, answer briefly and then steer back to collecting the missing detail. Always respond with ONLY a JSON object, with no markdown and no extra text, in exactly this shape: {\"reply\": \"message to send to the person\", \"name\": \"\", \"interest\": \"\", \"complete\": false}. Fill in each field as soon as you learn it and keep details from earlier in the conversation. Set complete to true ONLY in the single reply where you have both details and are thanking them. In any later message, set complete back to false."
+        }
+      },
+      "id": "n-agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "n-llm",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        820,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Extract Message').item.json.jid }}",
+        "contextWindowLength": 10
+      },
+      "id": "n-mem",
+      "name": "Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1000,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst raw = item.output || item.text || '';\nconst ex = $('Extract Message').first().json;\n\nlet data;\ntry {\n  const match = raw.match(/\\{[\\s\\S]*\\}/);\n  data = JSON.parse(match ? match[0] : raw);\n} catch (e) {\n  data = { reply: raw || 'Sorry, could you say that again?' };\n}\n\nconst complete = data.complete === true && !!data.name && !!data.interest;\n\nreturn [{\n  json: {\n    number: ex.number,\n    jid: ex.jid,\n    reply: data.reply || '',\n    name: data.name || '',\n    interest: data.interest || '',\n    complete,\n    date: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "n-parse",
+      "name": "Parse AI Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.evolution_url }}/message/sendText/{{ $('Config').first().json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').first().json.api_key }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.number, text: $json.reply }) }}",
+        "options": {}
+      },
+      "id": "n-reply",
+      "name": "Send Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1420,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1d2e3f4-lead-4a5b-8c9d-aaaaaaaaaaaa",
+              "leftValue": "={{ $json.complete }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n-if-lead",
+      "name": "Lead Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Name": "={{ $json.name }}",
+            "WhatsApp Number": "={{ $json.number }}",
+            "Interest": "={{ $json.interest }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "n-sheet",
+      "name": "Save to Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1680,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.evolution_url }}/message/sendText/{{ $('Config').first().json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').first().json.api_key }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $('Config').first().json.owner_number, text: 'New lead captured\\nName: ' + $('Parse AI Reply').item.json.name + '\\nWhatsApp: +' + $('Parse AI Reply').item.json.number + '\\nInterest: ' + $('Parse AI Reply').item.json.interest }) }}",
+        "options": {}
+      },
+      "id": "n-alert",
+      "name": "Alert Owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1940,
+        380
+      ]
+    }
+  ],
+  "connections": {
+    "WhatsApp Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Extract Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message": {
+      "main": [
+        [
+          {
+            "node": "Should Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Reply?": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Reply",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Lead Complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Complete?": {
+      "main": [
+        [
+          {
+            "node": "Save to Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Save to Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
